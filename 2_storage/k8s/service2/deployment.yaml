@@ -1,0 +1,37 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: service2-deployment
+spec:
+  replicas: 1                      # кількість екземплярів Pod, що буде створено цим Deployment
+  selector:
+    matchLabels:
+      app: service2                # селектор по якому Deployment зв'язаний з Pod
+  template:
+    metadata:
+      labels:
+        app: service2               # мітка Pod по якому вона буде зв'язана з Deployment та Service
+    spec:
+      initContainers:
+        - name: create-db2
+          image: postgres:14.1-alpine3.15
+          imagePullPolicy: "IfNotPresent"
+          command: ["psql", "postgres://postgres:postgres@postgres.default:5432/?sslmode=disable", "-c CREATE DATABASE demo2", "2>/dev/null"]
+        - name: run-migrations2
+          image: service2-migrations:0.2
+          imagePullPolicy: Never
+          command: ["migrate", "-path", "/migrations", "-database",  "$(POSTGRESQL_URL)", "up"]
+          env:
+            - name: POSTGRESQL_URL
+              value: "postgres://postgres:postgres@postgres.default:5432/demo2?sslmode=disable"
+      containers:
+        - image: service2:0.2      # образ Docker
+          name: service2           # ім'я контейнера
+          imagePullPolicy: Never
+          ports:
+            - containerPort: 8080  # порт по якому можна звертатись до поди
+          envFrom:
+            - configMapRef:
+                name: service2-config
+            - secretRef:
+                name: service2-secret
