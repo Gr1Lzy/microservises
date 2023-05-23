@@ -1,0 +1,28 @@
+clientImage: client:0.4
+
+postgresql:
+  global:
+    postgresql:
+      auth:
+          enablePostgresUser: true
+          postgresPassword: "demo"
+          username: "postgres"
+          password: "demo"
+          database: "demo"
+  fullnameOverride: "postgres"
+  primary:
+    persistence:
+      mountPath: /var/lib/postgresql/data
+      size: 2Gi
+
+services:
+  service1:
+    serviceName: service1
+    appImage: service1:0.4
+    migrationsImage: service1-migrations:0.4
+    helperService: service2
+  service2:
+    serviceName: service2
+    appImage: service2:0.4
+    migrationsImage: service2-migrations:0.4
+    helperService: service1
