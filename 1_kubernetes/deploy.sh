@@ -16,9 +16,9 @@ fi
 eval $(minikube -p minikube docker-env)
 
 # Push containers to Minikube's registry
-minikube image load service1:0.1
-minikube image load service2:0.1
-minikube image load client:0.1
+minikube image load service1:0.1 --overwrite=false
+minikube image load service2:0.1 --overwrite=false
+minikube image load client:0.1 --overwrite=false
 
 # Deploy to cluster
 kubectl apply -f k8s/client -f k8s/service1 -f k8s/service2

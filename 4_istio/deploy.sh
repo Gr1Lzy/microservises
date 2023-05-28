@@ -5,7 +5,7 @@ if ! minikube status &> /dev/null; then
     echo "Minikube is not running. Starting Minikube..."
 
     # Start Minikube
-    if ! minikube start; then
+    if ! minikube start --cpus=max --memory=max; then # Istio requires at least 8GB of RAM
         echo "Failed to start Minikube."
         exit 1
     fi
@@ -37,13 +37,13 @@ cd -
 eval $(minikube -p minikube docker-env)
 
 echo "Pushing service1 to Minikube..."
-minikube image load service1:0.4
-minikube image load service1-migrations:0.4
+minikube image load service1:0.4 --overwrite=false
+minikube image load service1-migrations:0.4 --overwrite=false
 echo "Pushing service2 to Minikube..."
-minikube image load service2:0.4
-minikube image load service2-migrations:0.4
+minikube image load service2:0.4 --overwrite=false
+minikube image load service2-migrations:0.4 --overwrite=false
 echo "Pushing client to Minikube..."
-minikube image load client:0.4
+minikube image load client:0.4 --overwrite=false
 
 # Deploy Istio
 kubectl create namespace istio-system
@@ -53,4 +53,5 @@ kubectl label namespace default istio-injection=enabled
 
 # Deploy services to cluster
 helm install local helm/v1
+kubectl apply -f k8s/istio
 kubectl proxy

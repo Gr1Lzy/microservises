@@ -12,6 +12,9 @@ import (
 	"strconv"
 
 	_ "github.com/lib/pq"
+	"github.com/prometheus/client_golang/prometheus"
+	"github.com/prometheus/client_golang/prometheus/promauto"
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/segmentio/kafka-go"
 )
 
@@ -27,6 +30,28 @@ type User struct {
 	Email              string `json:"email"`
 	LastOrderedProduct int    `json:"last_ordered_product"`
 }
+
+var (
+	httpRequestsTotal = promauto.NewCounter(prometheus.CounterOpts{
+		Name: "http_requests_total",
+		Help: "Total number of HTTP requests received",
+	})
+
+	httpRequestDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "http_request_duration_seconds",
+		Help: "Time taken to process an HTTP request",
+	})
+
+	dbConnections = promauto.NewGauge(prometheus.GaugeOpts{
+		Name: "db_connections",
+		Help: "Current number of database connections",
+	})
+
+	dbQueryDuration = promauto.NewHistogram(prometheus.HistogramOpts{
+		Name: "db_query_duration_seconds",
+		Help: "Time taken to process a database query",
+	})
+)
 
 func main() {
 	host := os.Getenv("DB_HOST")
@@ -48,12 +73,18 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer db.Close()
+	dbConnections.Inc() // Increment dbConnections gauge
+	defer func() {
+		dbConnections.Dec() // Decrement dbConnections gauge
+		db.Close()
+	}()
 
 	// Initialize Kafka writer
 	serviceLogWriter := initKafkaWriter()
 
 	// Initialize HTTP routes
+	http.Handle("/metrics", promhttp.Handler())
+
 	http.HandleFunc("/users", logRequests(serviceLogWriter, func(w http.ResponseWriter, r *http.Request) {
 		switch r.Method {
 		case http.MethodGet:
@@ -90,14 +121,22 @@ func main() {
 		}
 	}))
 
-	// Start the HTTP server
-	log.Println("Server listening on :8080")
-	log.Fatal(http.ListenAndServe(":8080", nil))
+	// Start HTTP server
+	log.Fatal(http.ListenAndServe(":8000", nil))
 }
 
-func logRequests(kafkaWriter *kafka.Writer, next http.HandlerFunc) http.HandlerFunc {
+func initKafkaWriter() *kafka.Writer {
+	kafkaWriter := kafka.NewWriter(kafka.WriterConfig{
+		Brokers:  []string{"localhost:9092"},
+		Topic:    "service-log",
+		Balancer: &kafka.LeastBytes{},
+	})
+	return kafkaWriter
+}
+
+func logRequests(serviceLogWriter *kafka.Writer, next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		// Log the request
+		// Notify broker
 		go func() {
 			logData := map[string]interface{}{
 				"method": r.Method,
@@ -105,42 +144,36 @@ func logRequests(kafkaWriter *kafka.Writer, next http.HandlerFunc) http.HandlerF
 				"ip":     r.RemoteAddr,
 			}
 			logBytes, _ := json.Marshal(logData)
-			kafkaWriter.WriteMessages(
+			serviceLogWriter.WriteMessages(
 				context.Background(),
-				kafka.Message{Value: logBytes},
+				kafka.Message{
+					Value: logBytes,
+				},
 			)
 		}()
 
-		// Call the next handler
+		httpRequestsTotal.Inc()
+		timer := prometheus.NewTimer(httpRequestDuration)
 		next(w, r)
+		timer.ObserveDuration()
 	}
-}
-
-func initKafkaWriter() *kafka.Writer {
-	brokers := []string{os.Getenv("KAFKA_HOST")}
-	topic := os.Getenv("KAFKA_TOPIC")
-	return kafka.NewWriter(kafka.WriterConfig{
-		Brokers:  brokers,
-		Topic:    topic,
-		Balancer: &kafka.LeastBytes{},
-	})
 }
 
 func getUsers(db *sql.DB, w http.ResponseWriter, r *http.Request) {
+	timer := prometheus.NewTimer(dbQueryDuration)
 	rows, err := db.Query("SELECT * FROM users")
+	timer.ObserveDuration()
 	if err != nil {
-		w.WriteHeader(http.StatusInternalServerError)
-		fmt.Fprintf(w, "Failed to get users from the database: %s", err.Error())
+		http.Error(w, "Failed to query users", http.StatusInternalServerError)
 		return
 	}
-	defer rows.Close()
 
-	users := make([]User, 0)
+	var users []User
 	for rows.Next() {
 		var user User
-		if err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.LastOrderedProduct); err != nil {
-			w.WriteHeader(http.StatusInternalServerError)
-			fmt.Fprintf(w, "Failed to scan users from the database: %s", err.Error())
+		err := rows.Scan(&user.ID, &user.Username, &user.Email, &user.LastOrderedProduct)
+		if err != nil {
+			http.Error(w, "Failed to scan user", http.StatusInternalServerError)
 			return
 		}
 		users = append(users, user)
@@ -159,7 +192,9 @@ func getUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	timer := prometheus.NewTimer(dbQueryDuration)
 	row := db.QueryRow("SELECT * FROM users WHERE id = $1", id)
+	timer.ObserveDuration()
 
 	var user User
 	if err := row.Scan(&user.ID, &user.Username, &user.Email, &user.LastOrderedProduct); err != nil {
@@ -191,7 +226,9 @@ func createUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	timer := prometheus.NewTimer(dbQueryDuration)
 	err := db.QueryRow("INSERT INTO users (username, email, last_ordered_product) VALUES ($1, $2, $3) RETURNING id", user.Username, user.Email, user.LastOrderedProduct).Scan(&user.ID)
+	timer.ObserveDuration()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Failed to create user in the database: %s", err.Error())
@@ -224,7 +261,9 @@ func updateUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	timer := prometheus.NewTimer(dbQueryDuration)
 	result, err := db.Exec("UPDATE users SET username = $1, email = $2 WHERE id = $3", user.Username, user.Email, id)
+	timer.ObserveDuration()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Failed to update user in the database: %s", err.Error())
@@ -251,7 +290,9 @@ func deleteUser(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	timer := prometheus.NewTimer(dbQueryDuration)
 	result, err := db.Exec("DELETE FROM users WHERE id = $1", id)
+	timer.ObserveDuration()
 	if err != nil {
 		w.WriteHeader(http.StatusInternalServerError)
 		fmt.Fprintf(w, "Failed to delete user from the database: %s", err.Error())
@@ -279,7 +320,9 @@ func getLastOrderedProduct(db *sql.DB, w http.ResponseWriter, r *http.Request) {
 	}
 	fmt.Printf("Parsed user ID: %d\n", id)
 
+	timer := prometheus.NewTimer(dbQueryDuration)
 	row := db.QueryRow("SELECT * FROM users WHERE id = $1", id)
+	timer.ObserveDuration()
 
 	var user User
 	if err := row.Scan(&user.ID, &user.Username, &user.Email, &user.LastOrderedProduct); err != nil {

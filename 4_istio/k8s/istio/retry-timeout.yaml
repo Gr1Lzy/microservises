@@ -1,15 +1,36 @@
-apiVersion: networking.istio.io/v1alpha3
+apiVersion: networking.istio.io/v1beta1
+kind: DestinationRule
+metadata:
+  name: local-service2-service-destination
+spec:
+  host: local-service2-service
+  subsets:
+    - name: v1
+      labels:
+        version: v1
+    - name: v2
+      labels:
+        version: v2
+---
+apiVersion: networking.istio.io/v1beta1
 kind: VirtualService
 metadata:
-  name: product-service
+  name: local-service2-service-route
 spec:
   hosts:
-  - product-service
+    - local-service2-service
   http:
-  - route:
-    - destination:
-        host: product-service
-    timeout: 1s
-    retries:
-      attempts: 3
-      perTryTimeout: 1s
+    - route:
+      - destination:
+          host: local-service2-service
+          subset: v2
+        weight: 80
+      - destination:
+          host: local-service2-service
+          subset: v1
+        weight: 20
+      retries:
+        attempts: 3
+        perTryTimeout: 1s
+        retryOn: 5xx
+      timeout: 3s

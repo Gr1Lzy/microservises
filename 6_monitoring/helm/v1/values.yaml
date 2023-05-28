@@ -25,6 +25,12 @@ kafka:
       - name: service1_logs
       - name: service2_logs
 
+sidecar:
+  datasources:
+    enabled: true
+    label: grafana_datasource
+    searchNamespace: ALL
+
 logger:
   image: logger:0.6
 

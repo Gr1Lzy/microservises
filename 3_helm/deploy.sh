@@ -32,13 +32,13 @@ fi
 eval $(minikube -p minikube docker-env)
 
 echo "Pushing service1 to Minikube..."
-minikube image load service1:0.3
-minikube image load service1-migrations:0.3
+minikube image load service1:0.3 --overwrite=false
+minikube image load service1-migrations:0.3 --overwrite=false
 echo "Pushing service2 to Minikube..."
-minikube image load service2:0.3
-minikube image load service2-migrations:0.3
+minikube image load service2:0.3 --overwrite=false
+minikube image load service2-migrations:0.3 --overwrite=false
 echo "Pushing client to Minikube..."
-minikube image load client:0.3
+minikube image load client:0.3 --overwrite=false
 
 # Deploy to cluster
 helm install local helm/v1

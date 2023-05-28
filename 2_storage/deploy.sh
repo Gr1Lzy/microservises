@@ -32,13 +32,13 @@ eval $(minikube -p minikube docker-env)
 
 # Push containers to Minikube's registry
 echo "Pushing service1 to Minikube..."
-minikube image load service1:0.2
-minikube image load service1-migrations:0.2
+minikube image load service1:0.2 --overwrite=false
+minikube image load service1-migrations:0.2 --overwrite=false
 echo "Pushing service2 to Minikube..."
-minikube image load service2:0.2
-minikube image load service2-migrations:0.2
+minikube image load service2:0.2 --overwrite=false
+minikube image load service2-migrations:0.2 --overwrite=false
 echo "Pushing client to Minikube..."
-minikube image load client:0.2
+minikube image load client:0.2 --overwrite=false
 
 # Deploy to cluster
 kubectl apply -f k8s/client -f k8s/postgres -f k8s/service1 -f k8s/service2

@@ -75,6 +75,7 @@ func main() {
 		}
 	}()
 
+	log.Println("Listening topics...")
 	// Wait for the termination signal
 	<-ctx.Done()
 	log.Println("Service stopped.")
